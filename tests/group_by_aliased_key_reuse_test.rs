@@ -83,24 +83,75 @@ fn test_aliased_function_group_key_reused_by_another_column() {
     assert_eq!(lengths, vec![Some(2), Some(3)]);
 }
 
+fn strings(db: &Database, sql: &str) -> Vec<String> {
+    db.query(sql, ())
+        .unwrap()
+        .map(|row| {
+            let row = row.unwrap();
+            (0..row.len())
+                .map(|i| format!("{:?}", row.get::<stoolap::Value>(i).unwrap()))
+                .collect::<Vec<_>>()
+                .join("|")
+        })
+        .collect()
+}
+
 #[test]
-fn test_group_key_lookup_keeps_string_literal_case() {
+fn test_aliased_group_key_with_string_literals_is_not_reused() {
     let db = Database::open("memory://group_by_literal_case").unwrap();
     db.execute("CREATE TABLE t (s TEXT)", ()).unwrap();
     db.execute("INSERT INTO t VALUES ('A')", ()).unwrap();
+    assert_eq!(
+        strings(
+            &db,
+            "SELECT replace(s, 'a', 'b') AS g, replace(s, 'A', 'B') AS h FROM t GROUP BY s, replace(s, 'a', 'b')"
+        ),
+        strings(&db, "SELECT 'A', 'B'")
+    );
 
-    for sql in [
-        "SELECT replace(s, 'a', 'b') AS g, replace(s, 'A', 'B') AS h FROM t GROUP BY s, replace(s, 'a', 'b')",
-        "SELECT replace(s, 'a', 'b'), replace(s, 'A', 'B') FROM t GROUP BY s, replace(s, 'a', 'b')",
-    ] {
-        let row: Vec<String> = db
-            .query(sql, ())
-            .unwrap()
-            .map(|row| {
-                let row = row.unwrap();
-                format!("{}{}", row.get::<String>(0).unwrap(), row.get::<String>(1).unwrap())
-            })
-            .collect();
-        assert_eq!(row, vec!["AB".to_string()], "{}", sql);
-    }
+    db.execute("CREATE TABLE q (s TEXT)", ()).unwrap();
+    db.execute("INSERT INTO q VALUES ('''A')", ()).unwrap();
+    assert_eq!(
+        strings(
+            &db,
+            "SELECT replace(s, '''a', 'b') AS g, replace(s, '''A', 'B') AS h FROM q GROUP BY s, replace(s, '''a', 'b')"
+        ),
+        strings(&db, "SELECT '''A', 'B'")
+    );
+}
+
+#[test]
+fn test_literal_case_in_other_aggregate_lookups() {
+    let db = Database::open("memory://aggregate_literal_lookups").unwrap();
+    db.execute("CREATE TABLE t (s TEXT)", ()).unwrap();
+    db.execute("INSERT INTO t VALUES ('A'), ('b')", ()).unwrap();
+
+    assert_eq!(
+        strings(&db, "SELECT MAX('UPPER'), COUNT(*) + 1 FROM t"),
+        strings(&db, "SELECT 'UPPER', 3")
+    );
+    assert_eq!(
+        strings(
+            &db,
+            "SELECT s FROM t GROUP BY s HAVING SUM(CASE WHEN s = 'A' THEN 1 ELSE 0 END) > 0"
+        ),
+        strings(&db, "SELECT 'A'")
+    );
+    assert_eq!(
+        strings(
+            &db,
+            "SELECT s, RANK() OVER (ORDER BY SUM(CASE WHEN s = 'A' THEN 1 ELSE 0 END) DESC) FROM t GROUP BY s ORDER BY s"
+        ),
+        strings(&db, "SELECT 'A', 1 UNION ALL SELECT 'b', 2")
+    );
+
+    db.execute("CREATE TABLE w (\"a'B\" INTEGER)", ()).unwrap();
+    db.execute("INSERT INTO w VALUES (1), (2)", ()).unwrap();
+    assert_eq!(
+        strings(
+            &db,
+            "SELECT COUNT(*) OVER (PARTITION BY \"a'B\") FROM w ORDER BY 1"
+        ),
+        strings(&db, "SELECT 1 UNION ALL SELECT 1")
+    );
 }

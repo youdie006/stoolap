@@ -1604,7 +1604,7 @@ impl<'a> CompiledEvaluator<'a> {
     /// Add aggregate expression aliases for HAVING clause evaluation
     pub fn add_aggregate_aliases(&mut self, aliases: &[(String, usize)]) {
         for (expr_name, idx) in aliases {
-            let lower = crate::executor::utils::lower_expr_key(expr_name);
+            let lower = expr_name.to_lowercase();
             self.expression_aliases.insert(lower, *idx as u16);
         }
         // Invalidate local cache since compilation context changed
@@ -1614,7 +1614,7 @@ impl<'a> CompiledEvaluator<'a> {
     /// Add expression aliases for HAVING clause with GROUP BY expressions
     pub fn add_expression_aliases(&mut self, aliases: &[(String, usize)]) {
         for (expr_str, idx) in aliases {
-            let lower = crate::executor::utils::lower_expr_key(expr_str);
+            let lower = expr_str.to_lowercase();
             self.expression_aliases.insert(lower, *idx as u16);
         }
         // Invalidate local cache since compilation context changed
